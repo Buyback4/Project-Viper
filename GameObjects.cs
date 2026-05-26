@@ -2,6 +2,8 @@
 
 namespace Snake
 {
+    public enum GameState { Menu, Settings, Instructions, Playing, GameOver, Paused }
+
     public class Projectile
     {
         public Point Pos;
@@ -9,7 +11,12 @@ namespace Snake
         public bool IsPlayerBullet;
     }
 
-    // золотое яблоко
+    public class Sentinel
+    {
+        public Point Pos;
+        public int Charge;
+    }
+
     public enum FoodType { Normal, Golden }
 
     public class Apple

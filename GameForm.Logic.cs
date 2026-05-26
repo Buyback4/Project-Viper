@@ -16,7 +16,7 @@ namespace Snake
             stones = new List<Point>();
             devourers = new List<Point>();
             hunters = new List<Point>();
-            sentinels = new List<Point>();
+            sentinels = new List<Sentinel>();
 
             score = 0;
             pendingGrowth = 0;
@@ -27,6 +27,8 @@ namespace Snake
 
             enemiesKilled = 0;
             sentinelUnlocked = false;
+
+            gameOverReason = "";
 
             GenerateFood();
         }
@@ -42,8 +44,7 @@ namespace Snake
                 foreach (var s in snake) if (s == p) isFree = false;
                 foreach (var st in stones) if (st == p) isFree = false;
                 foreach (var a in apples) if (a.Pos == p) isFree = false;
-
-                foreach (var sen in sentinels) if (sen == p) isFree = false;
+                foreach (var sen in sentinels) if (sen.Pos == p) isFree = false;
 
                 if (safeZone && isFree && snake.Count > 0)
                 {
@@ -58,9 +59,15 @@ namespace Snake
         private void GenerateFood()
         {
             int targetApples = 1;
+            int goldenChance = 10;
+
             if (currentStage == 3) targetApples = 2;
-            if (currentStage >= 4) targetApples = 3;
-            int goldenChance = currentStage >= 4 ? 15 : 10;
+            if (currentStage >= 4)
+            {
+                int extraPhases = currentStage - 4;
+                targetApples = 3 + extraPhases;
+                goldenChance = Math.Min(50, 15 + extraPhases * 5);
+            }
 
             while (apples.Count < targetApples)
             {
@@ -148,7 +155,7 @@ namespace Snake
 
                     if (!bulletDestroyed)
                         for (int s = sentinels.Count - 1; s >= 0; s--)
-                            if (sentinels[s] == bPos) { sentinels.RemoveAt(s); bulletDestroyed = true; enemiesKilled++; break; }
+                            if (sentinels[s].Pos == bPos) { sentinels.RemoveAt(s); bulletDestroyed = true; enemiesKilled++; break; }
                 }
 
                 if (bulletDestroyed) bullets.RemoveAt(i);
@@ -157,28 +164,39 @@ namespace Snake
 
         private void Update(object sender, EventArgs e)
         {
+            if (currentState != GameState.Playing)
+            {
+                this.Invalidate();
+                return;
+            }
+
             tickCounter++;
             int oldStage = currentStage;
 
-            if (score >= 4) currentStage = 4;
-            else if (score >= 3) currentStage = 3;
-            else if (score >= 2) currentStage = 2;
+            if (score >= 12) currentStage = 4 + (score - 12) / 10;
+            else if (score >= 7) currentStage = 3;
+            else if (score >= 4) currentStage = 2;
             else currentStage = 1;
 
             if (currentStage > oldStage) GenerateFood();
 
+            int extraPhases = Math.Max(0, currentStage - 4);
+            int currentMaxDevourers = BaseMaxDevourers + extraPhases;
+            int currentMaxHunters = BaseMaxHunters + extraPhases;
+            int currentMaxSentinels = BaseMaxSentinels + extraPhases;
+
             if (currentStage >= 2 && tickCounter % 40 == 0) SpawnStone();
-            if (currentStage >= 3 && tickCounter % 50 == 0 && devourers.Count < MaxDevourers) devourers.Add(GetFreePosition(true));
-            if (currentStage >= 4 && tickCounter % 60 == 0 && hunters.Count < MaxHunters) hunters.Add(GetFreePosition(true));
+            if (currentStage >= 3 && tickCounter % 50 == 0 && devourers.Count < currentMaxDevourers) devourers.Add(GetFreePosition(true));
+            if (currentStage >= 4 && tickCounter % 60 == 0 && hunters.Count < currentMaxHunters) hunters.Add(GetFreePosition(true));
 
             if (!sentinelUnlocked && enemiesKilled >= 2)
             {
                 sentinelUnlocked = true;
-                sentinels.Add(GetFreePosition(true));
+                sentinels.Add(new Sentinel { Pos = GetFreePosition(true), Charge = 0 });
             }
-            if (sentinelUnlocked && tickCounter % 90 == 0 && sentinels.Count < MaxSentinels)
+            if (sentinelUnlocked && tickCounter % 90 == 0 && sentinels.Count < currentMaxSentinels)
             {
-                sentinels.Add(GetFreePosition(true));
+                sentinels.Add(new Sentinel { Pos = GetFreePosition(true), Charge = 0 });
             }
 
             CheckBulletCollisions();
@@ -218,34 +236,44 @@ namespace Snake
                 for (int i = 0; i < hunters.Count; i++) hunters[i] = GetNextEnemyStep(hunters[i], snake[0]);
             }
 
-            if (tickCounter % 12 == 0)
+            foreach (var sen in sentinels)
             {
-                foreach (var sen in sentinels)
+                bool seesSnake = false;
+                Point targetDir = new Point(0, 0);
+
+                int[] dx = { 0, 0, -1, 1 };
+                int[] dy = { -1, 1, 0, 0 };
+
+                for (int dir = 0; dir < 4; dir++)
                 {
-                    Point snakeHead = snake[0];
-                    if (sen.X == snakeHead.X || sen.Y == snakeHead.Y)
+                    Point checkPos = new Point(sen.Pos.X + dx[dir], sen.Pos.Y + dy[dir]);
+
+                    while (IsWalkable(checkPos))
                     {
-                        bool clearPath = true;
-                        int stepX = sen.X == snakeHead.X ? 0 : (snakeHead.X > sen.X ? 1 : -1);
-                        int stepY = sen.Y == snakeHead.Y ? 0 : (snakeHead.Y > sen.Y ? 1 : -1);
-
-                        Point checkPos = new Point(sen.X + stepX, sen.Y + stepY);
-
-                        while (checkPos != snakeHead)
+                        if (snake.Contains(checkPos))
                         {
-                            if (!IsWalkable(checkPos))
-                            {
-                                clearPath = false;
-                                break;
-                            }
-                            checkPos.X += stepX; checkPos.Y += stepY;
+                            seesSnake = true;
+                            targetDir = new Point(dx[dir], dy[dir]);
+                            break;
                         }
-
-                        if (clearPath)
-                        {
-                            bullets.Add(new Projectile { Pos = new Point(sen.X + stepX, sen.Y + stepY), Dir = new Point(stepX, stepY), IsPlayerBullet = false });
-                        }
+                        checkPos.X += dx[dir];
+                        checkPos.Y += dy[dir];
                     }
+                    if (seesSnake) break;
+                }
+
+                if (seesSnake)
+                {
+                    sen.Charge++;
+                    if (sen.Charge >= 10)
+                    {
+                        bullets.Add(new Projectile { Pos = new Point(sen.Pos.X + targetDir.X, sen.Pos.Y + targetDir.Y), Dir = targetDir, IsPlayerBullet = false });
+                        sen.Charge = 0;
+                    }
+                }
+                else
+                {
+                    if (sen.Charge > 0) sen.Charge--;
                 }
             }
 
@@ -265,8 +293,7 @@ namespace Snake
             foreach (var st in stones) if (st == newHead) { GameOver("Вы разбились о камень!"); return; }
             foreach (var d in devourers) if (d == newHead) { GameOver("Пожиратель уничтожил вас!"); return; }
             foreach (var h in hunters) if (h == newHead) { GameOver("Охотник поймал вас!"); return; }
-
-            foreach (var s in sentinels) if (s == newHead) { GameOver("Вы врезались в Стража!"); return; }
+            foreach (var s in sentinels) if (s.Pos == newHead) { GameOver("Вы врезались в Стража!"); return; }
 
             snake.Insert(0, newHead);
 
